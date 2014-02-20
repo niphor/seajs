@@ -249,7 +249,7 @@ function id2Uri(id, refUri) {
 }
 
 
-var doc = document
+var doc = global.document
 var cwd = dirname(doc.URL)
 var scripts = doc.scripts
 
@@ -277,7 +277,7 @@ seajs.resolve = id2Uri
  * ref: tests/research/load-js-css/test.html
  */
 
-var head = doc.getElementsByTagName("head")[0] || doc.documentElement
+var head = doc.head || doc.getElementsByTagName("head")[0] || doc.documentElement
 var baseElement = head.getElementsByTagName("base")[0]
 
 var IS_CSS_RE = /\.css(?:\?|$)/i
@@ -475,14 +475,16 @@ var STATUS = Module.STATUS = {
   FETCHING: 1,
   // 2 - The meta data has been saved to cachedMods
   SAVED: 2,
-  // 3 - The `module.dependencies` are being loaded
-  LOADING: 3,
-  // 4 - The module are ready to execute
-  LOADED: 4,
-  // 5 - The module is being executed
-  EXECUTING: 5,
-  // 6 - The `module.exports` is available
-  EXECUTED: 6
+  // 3 - The non-CMD `module` is blocking 
+  BLOCKING: 3,
+  // 4 - The `module.dependencies` are being loaded
+  LOADING: 4,
+  // 5 - The module are ready to execute
+  LOADED: 5,
+  // 6 - The module is being executed
+  EXECUTING: 6,
+  // 7 - The `module.exports` is available
+  EXECUTED: 7
 }
 
 
@@ -516,18 +518,25 @@ Module.prototype.load = function() {
   var mod = this
 
   // If the module is being loaded, just wait it onload call
-  if (mod.status >= STATUS.LOADING) {
+  if (mod.status >= STATUS.BLOCKING) {
     return
   }
 
-  mod.status = STATUS.LOADING
+  var uris = mod.resolve()
+
+  if(mod.noncmd && uris.length){
+    mod.status = STATUS.BLOCKING
+  }else{
+    mod.status = STATUS.LOADING
+  }
 
   // Emit `load` event for plugins such as combo plugin
-  var uris = mod.resolve()
+  //var uris = mod.resolve()
   emit("load", uris)
 
   var len = mod._remain = uris.length
   var m
+  var requestCache = {}
 
   // Initialize modules and register waitings
   for (var i = 0; i < len; i++) {
@@ -548,10 +557,15 @@ Module.prototype.load = function() {
   }
 
   // Begin parallel loading
-  var requestCache = {}
+  //var requestCache = {}
 
   for (i = 0; i < len; i++) {
     m = cachedMods[uris[i]]
+
+    if(m.noncmd && m.resolve().length >0){
+        m.load()
+        continue
+    }
 
     if (m.status < STATUS.FETCHING) {
       m.fetch(requestCache)
@@ -585,9 +599,22 @@ Module.prototype.onload = function() {
   for (uri in waitings) {
     if (waitings.hasOwnProperty(uri)) {
       m = cachedMods[uri]
-      m._remain -= waitings[uri]
-      if (m._remain === 0) {
-        m.onload()
+      if(m.noncmd && m.status === STATUS.BLOCKING){
+        m.status = STATUS.SAVED
+        var requestCache={}
+        m.fetch(requestCache)
+        // Send all requests at last to avoid cache bug in IE6-9. Issues#808
+        for (var requestUri in requestCache) {
+          if (requestCache.hasOwnProperty(requestUri)) {
+            requestCache[requestUri]()
+          }
+        }
+        
+      }else{
+        m._remain -= waitings[uri]
+        if (m._remain === 0) {
+          m.onload()
+        }
       }
     }
   }
@@ -708,6 +735,12 @@ Module.prototype.exec = function () {
   emit("exec", mod)
 
   return exports
+}
+
+//Remove A Module
+Module.prototype.destroy = function() {
+  delete cachedModules[this.uri]
+  delete fetchedList[this.uri]
 }
 
 // Resolve id to uri
@@ -856,6 +889,7 @@ data.cid = cid
 seajs.require = function(id) {
   var mod = Module.get(Module.resolve(id))
   if (mod.status < STATUS.EXECUTING) {
+    mod.onload()
     mod.exec()
   }
   return mod.exports
@@ -941,5 +975,56 @@ seajs.config = function(configData) {
   emit("config", configData)
   return seajs
 }
+
+/**
+ * util-shim.js
+ * Add shim config for configuring the dependencies and exports for
+ * older, traditional "browser globals" scripts that do not use define()
+ * to declare the dependencies and set a module value.
+ */
+;(function(seajs){
+  // seajs.config({
+  // alias: {
+  //   "jquery": {
+  //     src: "lib/jquery.js",
+  //     exports: "jQuery" or function
+  //   },
+  //   "jquery.easing": {
+  //     src: "lib/jquery.easing.js",
+  //     deps: ["jquery"]
+  //   }
+  // })
+
+  seajs.on("config", onConfig)
+  onConfig(seajs.config.data)
+
+  function onConfig(data) {
+    if (!data) return
+    var alias = data.alias
+
+    for (var id in alias) {
+      (function(item) {
+        if (typeof item === "string") return
+
+        // Set dependencies
+        //item.src && item.deps && define(item.src, item.deps,null)
+        if(item.src){
+           var mod = seajs.Module.get(seajs.resolve(item.src),isArray(item.deps) ? item.deps: [])
+           mod.noncmd=true
+        }
+        // Define the proxy cmd module
+        define(id, item.src ? [seajs.resolve(item.src)] : item.deps || [],
+            function() {
+              var exports = item.exports
+              return typeof exports === "function" ? exports() :
+                  typeof exports === "string" ? global[exports] :
+                      exports
+            })
+      })(alias[id])
+    }
+  }
+
+  define("seajs-shim", [], {})
+})(seajs);
 
 })(this);
