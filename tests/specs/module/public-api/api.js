@@ -55,7 +55,7 @@ define(function(require, exports, mod) {
   assert(isFunction(Module.save), 'Module.save')
   assert(isFunction(Module.get), 'Module.get')
   assert(isFunction(Module.use), 'Module.use')
-  assert(isFunction(Module.preload), 'Module.preload')
+//  assert(isFunction(Module.preload), 'Module.preload')
 
   assert(isFunction(Module.prototype.resolve), 'Module.prototype.resolve')
   assert(isFunction(Module.prototype.load), 'Module.prototype.load')
