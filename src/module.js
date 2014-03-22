@@ -70,7 +70,7 @@ Module.prototype.load = function() {
   }
 
   // Emit `load` event for plugins such as combo plugin
-  //var uris = mod.resolve()
+  // var uris = mod.resolve()
   emit("load", uris)
 
   var len = mod._remain = uris.length
@@ -82,7 +82,7 @@ Module.prototype.load = function() {
     m = Module.get(uris[i])
 
     if (m.status < STATUS.LOADED) {
-      // Maybe duplicate
+      // Maybe duplicate: When module has dupliate dependency, it should be it's count, not 1
       m._waitings[mod.uri] = (m._waitings[mod.uri] || 0) + 1
     }
     else {
@@ -96,7 +96,7 @@ Module.prototype.load = function() {
   }
 
   // Begin parallel loading
-  //var requestCache = {}
+  // var requestCache = {}
 
   for (i = 0; i < len; i++) {
     m = cachedMods[uris[i]]
